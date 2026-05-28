@@ -24,7 +24,7 @@ onnx2qnn/
 ├── htp_backend_extensions.json      # Backend config (soc_id, dsp_arch, vtcm_mb)
 │
 ├── .gitignore
-└── readme.md                # This file
+└── readme.md                        # This file
 ```
 
 After running the pipeline:
