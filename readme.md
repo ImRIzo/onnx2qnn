@@ -1,4 +1,4 @@
-# model_converter
+# onnx2qnn
 
 Convert YOLOv8 ONNX → int8 QNN context binary for **Qualcomm HTP NPUs**.
 
@@ -10,7 +10,7 @@ Defaults target the **Radxa Dragon Q6A** (QCS6490 / Hexagon V68 / soc_id 35).
 ## Project structure
 
 ```
-model_converter/
+onnx2qnn/
 │
 ├── best.onnx                        # Your YOLOv8 ONNX model (input)
 ├── val2017/                         # Calibration images (~100 JPEGs)
