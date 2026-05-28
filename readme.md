@@ -15,7 +15,7 @@ onnx2qnn/
 ├── best.onnx                        # Your YOLOv8 ONNX model (input)
 ├── val2017/                         # Calibration images (~100 JPEGs)
 │
-├── onnx2qnn.sh                # Main script — runs the whole pipeline
+├── onnx2qnn.sh                      # Main script — runs the whole pipeline
 ├── prepare_onnx.py                  # Splits YOLOv8 output into boxes + scores
 ├── prepare_calib.py                 # Generates raw calibration data from images
 ├── generate_binary_ondevice.sh      # Helper: generate .bin on the ARM device
