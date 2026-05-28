@@ -47,7 +47,7 @@ export/
 | Calibration images | COCO val2017 or any ~100 JPEGs in `val2017/` |
 
 ---
-*** sometimes downloading sdk with web browser faild. better use wget ***
+** sometimes downloading sdk with web browser fails. better use wget **
 ## SoC configuration
 
 Two JSON files in the project root control which hardware the binary targets.
@@ -167,7 +167,7 @@ quantized DLC. The runtime uses these to dequantize int8 outputs back to float.
 | Problem | Fix |
 |---|---|
 | SDK not found | `source /path/to/qairt/bin/envsetup.sh` first |
-| Missing Python packages | `pip install onnx opencv-python numpy` |
+| Missing Python packages | `pip install onnx opencv-python numpy` | 
 | Wrong detections on device | ONNX probably wasn't split. Run with `--prepare-onnx`. |
 | VTCM size error on device | Set `vtcm_mb: 2` in `htp_backend_extensions.json` and rebuild. |
 | Segfault on device | Use `--retrieve_context` with the .bin, not `--dlc_path`. |
