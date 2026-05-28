@@ -13,7 +13,7 @@ Defaults target the **Radxa Dragon Q6A** (QCS6490 / Hexagon V68 / soc_id 35).
 onnx2qnn/
 │
 ├── best.onnx                        # Your YOLOv8 ONNX model (input)
-├── val2017/                         # Calibration images (~100 JPEGs)
+├── val2017/                         # Calibration images (~100 JPEGs), I used COCO2017 validation images
 │
 ├── onnx2qnn.sh                      # Main script — runs the whole pipeline
 ├── prepare_onnx.py                  # Splits YOLOv8 output into boxes + scores
@@ -24,7 +24,7 @@ onnx2qnn/
 ├── htp_backend_extensions.json      # Backend config (soc_id, dsp_arch, vtcm_mb)
 │
 ├── .gitignore
-└── LOCAL_PIPELINE.md                # This file
+└── readme.md                # This file
 ```
 
 After running the pipeline:
@@ -47,7 +47,7 @@ export/
 | Calibration images | COCO val2017 or any ~100 JPEGs in `val2017/` |
 
 ---
-
+*** sometimes downloading sdk with web browser faild. better use wget ***
 ## SoC configuration
 
 Two JSON files in the project root control which hardware the binary targets.
