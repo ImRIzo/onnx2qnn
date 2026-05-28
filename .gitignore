@@ -1,0 +1,19 @@
+# Calibration dataset (huge, user provides their own)
+val2017/
+*.jpg
+*.jpeg
+
+# Generated output (rebuild with local_pipeline.sh)
+export/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store

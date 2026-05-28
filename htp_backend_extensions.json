@@ -1,0 +1,14 @@
+{
+    "graphs": [
+        {
+            "graph_names": ["yolov8_det"],
+            "vtcm_mb": 2
+        }
+    ],
+    "devices": [
+        {
+            "dsp_arch": "v68",
+            "soc_id": 35
+        }
+    ]
+}
