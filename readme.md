@@ -18,7 +18,6 @@ onnx2qnn/
 ├── onnx2qnn.sh                      # Main script — runs the whole pipeline
 ├── prepare_onnx.py                  # Splits YOLOv8 output into boxes + scores
 ├── prepare_calib.py                 # Generates raw calibration data from images
-├── generate_binary_ondevice.sh      # Helper: generate .bin on the ARM device
 │
 ├── config_file.json                 # Backend config wrapper (edit for your SoC)
 ├── htp_backend_extensions.json      # Backend config (soc_id, dsp_arch, vtcm_mb)
@@ -41,7 +40,7 @@ export/
 
 | What | How |
 |---|---|
-| Linux x86-64 | Build machine. Tested on Ubuntu 22.04 with Python 3.10. |
+| Linux x86-64 | Tested on Ubuntu 22.04 with Python 3.10. |
 | QAIRT SDK 2.45.40 | [Download from Qualcomm](https://apigwx-aws.qualcomm.com/qsc/public/v1/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.45.40.260406/v2.45.40.260406.zip), then `source /path/to/qairt/bin/envsetup.sh` |
 | Python 3.10+ | `pip install onnx opencv-python numpy` |
 | Calibration images | COCO val2017 or any ~100 JPEGs in `val2017/` |
