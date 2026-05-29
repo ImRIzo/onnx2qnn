@@ -12,9 +12,9 @@
 #    4. Edit config_file.json + htp_backend_extensions.json for your SoC
 #
 #  Usage:
-#    ./local_pipeline.sh --onnx best.onnx --calib ./val2017/ --prepare-all
-#    ./local_pipeline.sh --ready-onnx best_ready.onnx --calib ./val2017/ --prepare-calib
-#    ./local_pipeline.sh --ready-onnx best_ready.onnx --input-list ./calib_raw/input_list.txt
+#    ./onnx2qnn.sh --onnx best.onnx --calib ./val2017/ --prepare-all
+#    ./onnx2qnn.sh --ready-onnx best_ready.onnx --calib ./val2017/ --prepare-calib
+#    ./onnx2qnn.sh --ready-onnx best_ready.onnx --input-list ./calib_raw/input_list.txt
 # ============================================================================
 set -euo pipefail
 
@@ -38,7 +38,7 @@ INPUT_LIST=""
 usage() {
     cat << 'HELPEOF'
 
-Usage: local_pipeline.sh [OPTIONS]
+Usage: onnx2qnn.sh [OPTIONS]
 
 Converts YOLOv8 ONNX → int8-quantized QNN context binary (.bin).
 SoC settings are read from config_file.json + htp_backend_extensions.json
@@ -66,7 +66,7 @@ in the project root. Edit those files for your hardware before running.
     --help, -h                 Show this message.
 
   QUICK START:
-    ./local_pipeline.sh --onnx best.onnx --calib ./val2017/ --prepare-all
+    ./onnx2qnn.sh --onnx best.onnx --calib ./val2017/ --prepare-all
 
 HELPEOF
     exit 0
