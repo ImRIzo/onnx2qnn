@@ -110,6 +110,49 @@ Binary at `export/yolov8_q6a.bin`.
 
 ---
 
+## Manual Setup
+
+If you prefer to run each step individually instead of using the single script:
+
+```bash
+# 0. Activate the SDK
+source /path/to/qairt/bin/envsetup.sh
+
+# 1. ONNX surgery — split [1,84,8400] output into boxes [1,4,8400] + scores [1,80,8400]
+python3 prepare_onnx.py --input best.onnx --output best_ready.onnx
+
+# 2. Generate calibration data (raw float32 files + input_list.txt)
+python3 prepare_calib.py --images "./val2017/*.jpg" --num 100 --output ./calib_raw
+
+# 3. ONNX → unquantized DLC
+qairt-converter \
+    --input_network best_ready.onnx \
+    --output_path yolov8_det.dlc \
+    --source_model_input_shape "images" 1,3,640,640 \
+    --target_backend HTP
+
+# 4. Quantize DLC (int8)
+qairt-quantizer \
+    --input_dlc yolov8_det.dlc \
+    --output_dlc yolov8_det_quant.dlc \
+    --input_list ./calib_raw/input_list.txt \
+    --act_quantizer_calibration min-max \
+    --param_quantizer_calibration min-max \
+    --target_backend HTP
+
+# 5. DLC → QNN context binary (.bin)
+qnn-context-binary-generator \
+    --dlc_path yolov8_det_quant.dlc \
+    --output_dir ./export \
+    --binary_file "yolov8_q6a" \
+    --backend libQnnHtp.so \
+    --config_file config_file.json
+```
+
+Binary at `export/yolov8_q6a.bin`.
+
+---
+
 ## What the pipeline does
 
 ### Step 1 — Split the ONNX output
