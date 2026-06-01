@@ -5,6 +5,9 @@
 #  Converts a YOLOv8 ONNX model into an int8-quantized context binary.
 #  Targets Radxa Dragon Q6A by default (QCS6490 / V68 HTP / soc_id=35).
 #
+#  The ONNX is first split into 2 outputs (boxes + scores) for int8 quantization.
+#  YOLOv8 design: boxes + scores.
+#
 #  Prerequisites:
 #    1. QAIRT SDK installed and sourced: source /path/to/qairt/bin/envsetup.sh
 #    2. Python 3 with: numpy, opencv-python, onnx
@@ -24,6 +27,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CALIB_NUM=100
 OUTPUT_DIR="./export"
 GRAPH_NAME="yolov8_det"
+NUM_CLASSES=""                          # auto-detect if empty, else 1-80
+INPUT_SHAPE="1,3,640,640"               # default static input B,C,H,W
 DO_ONNX_SURGERY=0
 DO_CALIB_GEN=0
 SKIP_BINARY_GEN=0
@@ -63,6 +68,8 @@ in the project root. Edit those files for your hardware before running.
     --graph-name <name>        Graph name in DLC (default: yolov8_det).
     --output-dir <dir>         Output directory (default: ./export).
     --skip-binary-gen          Skip binary gen. Generate on-device later.
+    --num-classes <n>          Number of classes (1-80). Auto-detect if omitted.
+	    --input-shape <B,C,H,W>    Static input shape (default: 1,3,640,640). Removes dynamic dims for faster inference.
     --help, -h                 Show this message.
 
   QUICK START:
@@ -88,6 +95,8 @@ while [[ $# -gt 0 ]]; do
         --prepare-calib)  DO_CALIB_GEN=1;                 shift   ;;
         --prepare-all)    DO_ONNX_SURGERY=1; DO_CALIB_GEN=1; shift ;;
         --skip-binary-gen) SKIP_BINARY_GEN=1;              shift   ;;
+        --num-classes)    NUM_CLASSES="$2";               shift 2 ;;
+        --input-shape)    INPUT_SHAPE="$2";               shift 2 ;;
         --help|-h)        usage ;;
         *) echo "ERROR: Unknown option: $1"; usage ;;
     esac
@@ -173,9 +182,13 @@ if [ "$DO_ONNX_SURGERY" -eq 1 ]; then
     echo "--- Step 1: ONNX surgery ---"
     FINAL_READY_ONNX="$WORK_DIR/best_ready.onnx"
 
+    NUM_CLASSES_ARG=()
+    [ -n "$NUM_CLASSES" ] && NUM_CLASSES_ARG=(--num-classes "$NUM_CLASSES")
+
     "$PYTHON_BIN" "$SCRIPT_DIR/prepare_onnx.py" \
         --input "$INPUT_ONNX" \
-        --output "$FINAL_READY_ONNX"
+        --output "$FINAL_READY_ONNX" \
+        "${NUM_CLASSES_ARG[@]}"
 
     echo "  Split ONNX: $FINAL_READY_ONNX"
 else
@@ -213,10 +226,19 @@ echo ""
 echo "--- Step 3: ONNX → unquantized DLC ---"
 UNQUANT_DLC="$WORK_DIR/${GRAPH_NAME}.dlc"
 
+# Auto-detect the input tensor name from the ONNX graph
+INPUT_NAME=$("$PYTHON_BIN" -c "
+import onnx
+m = onnx.load('$FINAL_READY_ONNX')
+print(m.graph.input[0].name)
+" 2>/dev/null || echo "images")
+
+echo "  Input: $INPUT_NAME  shape: $INPUT_SHAPE"
+
 "$QAIRT_CONVERTER" \
     --input_network "$FINAL_READY_ONNX" \
     --output_path "$UNQUANT_DLC" \
-    --source_model_input_shape "images" 1,3,640,640 \
+    --source_model_input_shape "$INPUT_NAME" "$INPUT_SHAPE" \
     --target_backend HTP
 
 DLC_SIZE=$(stat -c%s "$UNQUANT_DLC" 2>/dev/null || stat -f%z "$UNQUANT_DLC" 2>/dev/null)
@@ -334,7 +356,7 @@ if json_path and os.path.exists(json_path):
                     encodings['boxes_name'] = name
                     encodings['boxes_scale'] = enc.get('scale', 0.0)
                     encodings['boxes_offset'] = enc.get('offset', 0)
-                elif len(dims) == 3 and dims[1] == 80:
+                elif len(dims) == 3 and dims[1] != 4:
                     encodings['scores_name'] = name
                     encodings['scores_scale'] = enc.get('scale', 0.0)
                     encodings['scores_offset'] = enc.get('offset', 0)
@@ -348,21 +370,27 @@ if not encodings.get('boxes_scale') or not encodings.get('scores_scale'):
             capture_output=True, text=True, timeout=30
         )
         text = result.stdout + result.stderr
-        for pattern, key, scale_key, off_key in [
-            (r'images encoding\s*:\s*bitwidth\s+\d+,\s*min\s+([\d.e+-]+),\s*max\s+([\d.e+-]+),\s*scale\s+([\d.e+-]+),\s*offset\s+([\d.e+-]+)', 'images', 'input_scale', 'input_offset'),
-            (r'/model\.22/Sigmoid_output_0 encoding\s*:\s*bitwidth\s+\d+,\s*min\s+([\d.e+-]+),\s*max\s+([\d.e+-]+),\s*scale\s+([\d.e+-]+),\s*offset\s+([\d.e+-]+)', '/model.22/Sigmoid_output_0', 'scores_scale', 'scores_offset'),
-            (r'/model\.22/Mul_2_output_0 encoding\s*:\s*bitwidth\s+\d+,\s*min\s+([\d.e+-]+),\s*max\s+([\d.e+-]+),\s*scale\s+([\d.e+-]+),\s*offset\s+([\d.e+-]+)', '/model.22/Mul_2_output_0', 'boxes_scale', 'boxes_offset'),
-        ]:
-            m = re.search(pattern, text)
-            if m:
-                if key == 'images':
-                    encodings['input_name'] = key
-                elif 'Sigmoid' in key:
-                    encodings['scores_name'] = key
-                else:
-                    encodings['boxes_name'] = key
-                encodings[scale_key] = float(m.group(3))
-                encodings[off_key] = float(m.group(4))
+        # ── Auto-detect encoding lines for any tensor ─────────────
+        encoding_pattern = re.compile(
+            r'(\S+)\s+encoding\s*:\s*bitwidth\s+\d+,\s*min\s+([\d.e+-]+),\s*max\s+([\d.e+-]+),\s*scale\s+([\d.e+-]+),\s*offset\s+([\d.e+-]+)'
+        )
+        for m in encoding_pattern.finditer(text):
+            tname = m.group(1)
+            scale = float(m.group(4))
+            offset = float(m.group(5))
+            if tname == 'images':
+                encodings['input_name'] = tname
+                encodings['input_scale'] = scale
+                encodings['input_offset'] = offset
+            elif 'Sigmoid' in tname:
+                encodings['scores_name'] = tname
+                encodings['scores_scale'] = scale
+                encodings['scores_offset'] = offset
+            elif 'Mul_5' in tname or 'Mul_' in tname:
+                # Pick the last Mul_* output (boxes)
+                encodings['boxes_name'] = tname
+                encodings['boxes_scale'] = scale
+                encodings['boxes_offset'] = offset
     except Exception:
         pass
 
@@ -374,18 +402,25 @@ print(f'INPUT_OFFSET={encodings.get(\"input_offset\", 0)}')
 print(f'INPUT_NAME={encodings.get(\"input_name\", \"images\")}')
 print(f'BOXES_SCALE={bs:.15g}')
 print(f'BOXES_OFFSET={encodings.get(\"boxes_offset\", 0)}')
-print(f'BOXES_NAME={encodings.get(\"boxes_name\", \"/model.22/Mul_2_output_0\")}')
+print(f'BOXES_NAME={encodings.get(\"boxes_name\", \"output_0\")}')
 print(f'SCORES_SCALE={ss:.15g}')
 print(f'SCORES_OFFSET={encodings.get(\"scores_offset\", 0)}')
-print(f'SCORES_NAME={encodings.get(\"scores_name\", \"/model.22/Sigmoid_output_0\")}')
+print(f'SCORES_NAME={encodings.get(\"scores_name\", \"output_1\")}')
 ")
 
 eval "$ENCODING_DATA" 2>/dev/null || {
     echo "  WARNING: Could not parse encodings, using defaults."
     INPUT_SCALE=0.003921568859; INPUT_OFFSET=0.0; INPUT_NAME="images"
-    BOXES_SCALE=2.556329488754; BOXES_OFFSET=0.0; BOXES_NAME="/model.22/Mul_2_output_0"
-    SCORES_SCALE=0.003800418461; SCORES_OFFSET=0.0; SCORES_NAME="/model.22/Sigmoid_output_0"
+    BOXES_SCALE=2.556329488754; BOXES_OFFSET=0.0; BOXES_NAME="output_0"
+    SCORES_SCALE=0.003800418461; SCORES_OFFSET=0.0; SCORES_NAME="output_1"
 }
+
+# Determine num_classes for config JSON
+if [ -n "$NUM_CLASSES" ]; then
+    NUM_CLASSES_FOR_JSON="$NUM_CLASSES"
+else
+    NUM_CLASSES_FOR_JSON=80  # safe default for standard YOLOv8
+fi
 
 echo "  Input:  $INPUT_NAME  scale=$INPUT_SCALE  offset=$INPUT_OFFSET"
 echo "  Boxes:  $BOXES_NAME  scale=$BOXES_SCALE  offset=$BOXES_OFFSET"
@@ -406,7 +441,7 @@ cat > "$CONFIG_PATH" << JSONEOF
   "graph_name": "$DETECTED_GRAPH",
   "sdk_version": "$SDK_VERSION",
   "input_spec": "{None: [TensorSpec(name='$INPUT_NAME', dtype='uint8', shape=(1, 3, 640, 640), scale=$INPUT_SCALE, zero_point=${INPUT_OFFSET})]}",
-  "output_spec": "{None: [TensorSpec(name='$SCORES_NAME', dtype='uint8', shape=(1, 80, 8400), scale=$SCORES_SCALE, zero_point=${SCORES_OFFSET}), TensorSpec(name='$BOXES_NAME', dtype='uint8', shape=(1, 4, 8400), scale=$BOXES_SCALE, zero_point=${BOXES_OFFSET})]}",
+  "output_spec": "{None: [TensorSpec(name='$SCORES_NAME', dtype='uint8', shape=(1, $NUM_CLASSES_FOR_JSON, 8400), scale=$SCORES_SCALE, zero_point=${SCORES_OFFSET}), TensorSpec(name='$BOXES_NAME', dtype='uint8', shape=(1, 4, 8400), scale=$BOXES_SCALE, zero_point=${BOXES_OFFSET})]}",
   "boxes_scale": $BOXES_SCALE,
   "scores_scale": $SCORES_SCALE,
   "input_scale": $INPUT_SCALE,

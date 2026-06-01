@@ -16,7 +16,7 @@ onnx2qnn/
 ├── val2017/                         # Calibration images (~100 JPEGs), I used COCO2017 validation images
 │
 ├── onnx2qnn.sh                      # Main script — runs the whole pipeline
-├── prepare_onnx.py                  # Splits YOLOv8 output into boxes + scores
+├── prepare_onnx.py                  # Splits YOLOv8 output into boxes + scores (auto-detects tensors + class count)
 ├── prepare_calib.py                 # Generates raw calibration data from images
 │
 ├── config_file.json                 # Backend config wrapper (edit for your SoC)
@@ -29,7 +29,7 @@ onnx2qnn/
 After running the pipeline:
 ```
 export/
-├── yolov8_q6a.bin                   # The context binary (~4 MB)
+├── yolov8_q6a.bin                   # The context binary (~3.7 MB)
 ├── yolov8_q6a_config.json           # Runtime config (scales, tensor names)
 └── work/                            # Intermediate files (safe to delete)
 ```
@@ -89,11 +89,25 @@ source /path/to/qairt/bin/envsetup.sh
 # 2. Edit the configs for your hardware (or leave the QCS6490 defaults)
 vim htp_backend_extensions.json
 
-# 3. Run the pipeline:
+# 3. Run the pipeline (auto-detects class count from the model):
 ./onnx2qnn.sh \
     --onnx best.onnx \
     --calib ./val2017/ \
     --prepare-all
+
+# Or specify class count explicitly (e.g. 80 class YOLOv8 model --num-classes 80 ):
+./onnx2qnn.sh \
+    --onnx best.onnx \
+    --calib ./val2017/ \
+    --prepare-all \
+    --num-classes 80
+
+# Use a different input resolution (removes dynamic dims for faster inference):
+./onnx2qnn.sh \
+    --onnx best.onnx \
+    --calib ./val2017/ \
+    --prepare-all \
+    --input-shape 1,3,320,320
 ```
 
 Binary at `export/yolov8_q6a.bin`.
@@ -106,6 +120,9 @@ Binary at `export/yolov8_q6a.bin`.
 
 # Everything already prepared — just convert:
 ./onnx2qnn.sh --ready-onnx best_ready.onnx --input-list ./calib_raw/input_list.txt
+
+# Prepare ONNX only (with class count override):
+python3 prepare_onnx.py --input best.onnx --output best_ready.onnx --num-classes 1
 ```
 
 ---
@@ -118,8 +135,11 @@ If you prefer to run each step individually instead of using the single script:
 # 0. Activate the SDK
 source /path/to/qairt/bin/envsetup.sh
 
-# 1. ONNX surgery — split [1,84,8400] output into boxes [1,4,8400] + scores [1,80,8400]
+# 1. ONNX surgery — split combined output into boxes + scores (auto-detects tensors + class count)
 python3 prepare_onnx.py --input best.onnx --output best_ready.onnx
+
+#    Or override class count for single-class models:
+python3 prepare_onnx.py --input best.onnx --output best_ready.onnx --num-classes 1
 
 # 2. Generate calibration data (raw float32 files + input_list.txt)
 python3 prepare_calib.py --images "./val2017/*.jpg" --num 100 --output ./calib_raw
@@ -157,20 +177,26 @@ Binary at `export/yolov8_q6a.bin`.
 
 ### Step 1 — Split the ONNX output
 
-YOLOv8 exports a single output `[1,84,8400]` — 4 box channels plus 80 class channels
-glued together.
+YOLOv8 exports a single combined output — box coordinates plus class scores
+concatenated together (e.g. `[1, 84, 8400]` for 80 classes, or `[1, 5, 8400]`
+for a single-class model).
 
 **Problem:** int8 quantization gives this one tensor a single scale. Since boxes
 range 0–640 and scores range 0–1, the scale ends up ~2.5. Scores collapse to
 0 or 1 — random garbage detections.
 
-**Fix:** `prepare_onnx.py` splits it into two separate outputs, each with its own
-quantization scale:
+**Fix:** `prepare_onnx.py` finds the final Concat node in the ONNX graph and
+splits it into two separate outputs, each with its own quantization scale.
+Tensor names and class count are auto-detected from the model. Use
+`--num-classes N` to override.
 
-| Output | Shape | Scale |
+The QAIRT converter resolves input shape via `--source_model_input_shape`
+(default `1,3,640,640`), removing ~6 ms of runtime shape-resolution overhead.
+
+| Output | Shape | Scale (example) |
 |---|---|---|
-| `/model.22/Mul_2_output_0` | `[1, 4, 8400]` | ~2.55 |
-| `/model.22/Sigmoid_output_0` | `[1, 80, 8400]` | ~0.0038 |
+| boxes output (auto-detected) | `[1, 4, 8400]` | ~2.68 |
+| scores output (auto-detected) | `[1, N, 8400]` | ~0.0038 |
 
 ### Step 2 — Calibration data
 
@@ -210,7 +236,7 @@ quantized DLC. The runtime uses these to dequantize int8 outputs back to float.
 |---|---|
 | SDK not found | `source /path/to/qairt/bin/envsetup.sh` first |
 | Missing Python packages | `pip install onnx opencv-python numpy` | 
-| Wrong detections on device | ONNX probably wasn't split. Run with `--prepare-onnx`. |
+| Wrong detections on device | ONNX probably wasn't split. Run with `--prepare-onnx`. If using single-class model, add `--num-classes 1`. |
 | VTCM size error on device | Set `vtcm_mb: 2` in `htp_backend_extensions.json` and rebuild. |
 | Segfault on device | Use `--retrieve_context` with the .bin, not `--dlc_path`. |
 | Zero quantization scales | Calibration files wrong size. Each `.raw` must be 4,915,200 bytes. |
